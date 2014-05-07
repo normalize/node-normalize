@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+var fs = require('fs')
+var http = require('http')
+var path = require('path')
+var url = require('url')
+var es = require('esprima')
+var estraverse = require('estraverse')
+var mkdirp = require('mkdirp')
+
+var base = process.argv[2]
+
+function readFile(base) {
+
+  try {
+    var code = fs.readFileSync(base).toString()
+
+    estraverse.traverse(es.parse(code), {
+      enter: function (node, parent) {
+        if (node.type == 'VariableDeclarator' && node.init.callee.name == 'require') {
+
+          var p = node.init.arguments[0].value
+          var match = p.indexOf(':') > -1
+
+          if (match) {
+
+            var origin = url.parse(p)
+            var fullpath = path.join(__dirname, '/node_modules', origin.hostname, origin.pathname)
+            var dirname = path.dirname(fullpath)
+            var filename = path.basename(fullpath)
+
+            mkdirp.sync(dirname)
+
+            var writestream = fs.createWriteStream(fullpath)
+
+            var req = http.request(url.parse(p), function(res) {
+              res.setEncoding('utf8')
+              res.pipe(writestream)
+            })
+
+            req.on('error', function(e) {
+              console.log('problem getting module: ' + e.message);
+            })
+
+            req.end()
+
+          }
+          else {
+            readFile(path.resolve(p) + '.js')
+          }
+        } 
+      }
+    })
+
+  } catch($) { return }
+}
+
+readFile(base)
+
